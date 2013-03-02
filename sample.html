@@ -1,0 +1,127 @@
+<html>
+<head>
+    <title>WaniKani API Wrapper</title>
+    <script type="text/javascript" charset="utf-8" src="wanikani.js"></script>
+    <style>
+    .gravatar {
+        display: block;
+        width: 150px;
+        height: 150px;
+        float: left;
+    }
+    .username {
+        margin-bottom: 0;
+    }
+    .level {
+
+    }
+    .level:before {
+        content: "Level : ";
+    }
+    .title {
+        margin-top: 0;
+        margin-bottom: 0;
+    }
+    .title:before {
+        content: "of Sect ";
+    }
+    .about {
+
+    }
+    .website {
+        display: block;
+    }
+    .topics_count {
+
+    }
+    .topics_count::before {
+        content: "Scribed ";
+    }
+    .topics_count::after {
+        content: " topics and ";
+    }
+    .posts_count {
+        
+    }
+    .posts_count:after {
+        content: " posts";
+    }
+    .creation_date {
+
+    }
+    .creation_date:before {
+        content: "Effectively born on ";
+    }
+
+    </style>
+</head>
+<body>
+    <div id="wanikani-user">
+
+    </div>
+    <script>
+    var user = (function() {
+        var container = document.getElementById('wanikani-user');
+        var api_key = window.location.hash.slice(1);  // Remove leading hash;
+        if (api_key[0] == '/') {
+            api_key = api_key.slice(1);  // Remove optional '/'
+        }
+        if (api_key.length != 32) {
+            container.innerText = 'invalid API key (wrong length)';
+            return;
+        }
+
+        var query_error = function() {
+            console.log(arguments);
+            container.innerText = 'Query Error Occured';
+        };
+
+        var build_user_info = function(user) {
+            console.log(user.information);
+            container.appendChild(user.information.image(150, 'gravatar'));
+            var e = document.createElement('h1');
+            e.innerText = user.information.username;
+            e.setAttribute('class', 'username');
+            container.appendChild(e);
+
+            e = document.createElement('h2');
+            e.innerText = user.information.title;
+            e.setAttribute('class', 'title');
+            container.appendChild(e);
+
+            e = document.createElement('div');
+            e.innerText = user.information.level;
+            e.setAttribute('class', 'level');
+            container.appendChild(e);
+
+            container.appendChild(user.information.weblink('Website', 'website'));
+
+            e = document.createElement('span');
+            e.innerText = user.information.topics_count;
+            e.setAttribute('class', 'topics_count');
+            container.appendChild(e);
+
+            e = document.createElement('span');
+            e.innerText = user.information.posts_count;
+            e.setAttribute('class', 'posts_count');
+            container.appendChild(e);
+
+            e = document.createElement('div');
+            e.innerText = user.information.created();
+            e.setAttribute('class', 'creation_date');
+            container.appendChild(e);
+
+            e = document.createElement('div');
+            e.innerText = user.information.about || "Hi, I am " + user.information.username + '!';
+            e.setAttribute('class', 'about');
+            container.appendChild(e);
+        };
+
+        var user = wanikani.getUser(api_key);
+        user.withInfo().use(build_user_info).onError(query_error);
+        return user;
+    })();
+
+    </script>
+</body>
+</html>
