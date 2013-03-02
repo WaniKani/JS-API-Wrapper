@@ -7,15 +7,19 @@
 
     Basic usage:
 
-    // Get a user
-    user = wanikani.getUser(API_KEY);
+        // Get a user
+        user = wanikani.getUser(API_KEY);
 
-    // Get User Information
-    user.withUserInfo().do(function(user) {
-        console.log(user.user_information.username);
-    });
+        // Get User Information
+        user.withUserInfo().do(function(user) {
+            console.log(user.information.username);
+        });
+
+    Known Issues:
+        - current argument caching wont work with critical-items and
+            recent-unlocks
+
 */
-
 
 var wanikani = (function(window, document) {
     var users = {};
@@ -30,7 +34,8 @@ var wanikani = (function(window, document) {
         */
         var support = 'localStorage' in window && window.localStorage !== null;
         support = support && 'JSON' in window && window.JSON !== null;
-        var max_lifespan = 60 * 60 * 24 * 1000;  // 24 Hours
+        // var max_lifespan = 60 * 60 * 24 * 1000;  // 24 Hours
+        var max_lifespan = 60 * 60 * 2 * 1000;  // 2 Hours
         var setValue, getValue;
 
         var cache = support ? window.localStorage : ({});
@@ -49,10 +54,18 @@ var wanikani = (function(window, document) {
         };
         var deleteKey = function(key) {
             delete cache[key];
-            if (hasKey(key + '/args')) {
-                delete cache[key + '/args'];
+        };
+        var deletePrefix = function(prefix) {
+            for (var k in cache) {
+                if (k.slice(0, prefix.length) == prefix) {
+                    value = getValue(k);
+                    if (value !== null && value !== undefined) {
+                        deleteKey(k);
+                    }
+                }
             }
         };
+
         var setMaxAge = function(milliseconds) {
             max_lifespan = milliseconds;
         };
@@ -63,6 +76,19 @@ var wanikani = (function(window, document) {
                     deleteKey(k);
                 }
             }
+        };
+
+        var getPrefix = function(prefix) {
+            var result = {}, value;
+            for (var k in cache) {
+                if (k.slice(0, prefix.length) == prefix) {
+                    value = getValue(k);
+                    if (value !== null && value !== undefined) {
+                        result[k] = value;
+                    }
+                }
+            }
+            return result;
         };
 
         if (support) {
@@ -103,7 +129,9 @@ var wanikani = (function(window, document) {
             deleteKey: deleteKey,
             hasKey: hasKey,
             setMaxAge: setMaxAge,
-            cleanup: cleanup
+            cleanup: cleanup,
+            getPrefix: getPrefix,
+            deletePrefix: deletePrefix
         };
     })();
 
@@ -117,7 +145,7 @@ var wanikani = (function(window, document) {
         return 'wanikani.JSONP.' + id;
     };
 
-    var get_uri = function() {
+    var getURI = function() {
         var args = Array.prototype.slice.call(arguments, 0);
         args.unshift(api_base);
         return args.join('/');
@@ -210,14 +238,22 @@ var wanikani = (function(window, document) {
             destination.prototype[k] = source.prototype[k];
         }
     };
-    
 
     var UserInformation = function(data) {
         /*
             "username": STRING,
             "gravatar": STRING(32),
             "level": INT,
-            "title": STRING { "GUPPIE", ...},
+            "title": STRING { "unseen", "guppie", "apprentice", "guru", "master", "enlightened", "burned"},
+
+    "unseen": "rgb(40, 40, 40)",
+    "apprentice": "rgb(221, 0, 147)",
+    "guru": "rgb(136, 45, 158)",
+    "master": "rgb(41, 77, 219)",
+    "enlightened": "rgb(0, 147, 221)",
+    "burned": "rgb(240, 240, 240)"
+
+
             "about": STRING,
             "website": null || STRING,
             "twitter": null || STRING,
@@ -243,19 +279,25 @@ var wanikani = (function(window, document) {
         }
         return url;
     };
-    UserInformation.prototype.image = function(size, doc) {
+    UserInformation.prototype.profile_url = function() {
+        return 'http://www.wanikani.com/community/people/' + this.username;
+    };
+    UserInformation.prototype.image = function(size, cls, doc) {
         // Create Gravatar Image Element
         var e = (doc || document).createElement('img');
         if (size) {
             e.width = size;
             e.height = size;
         }
+        if (cls) {
+            e.setAttribute('class', cls);
+        }
         e.src = this.avatar_url(size);
         return e;
     };
     UserInformation.prototype.weblink = function(text, cls, doc) {
         var e = (doc || document).createElement('a');
-        e.href = this.website;
+        e.href = this.website || this.profile_url();
         if (text) {
             e.innerText = text;
         }
@@ -271,9 +313,10 @@ var wanikani = (function(window, document) {
     var Radical = function(data) {
         this.update(data);
     };
+    Radical.prototype.referenceName = 'radicals';
     Radical.prototype.update = UserInformation.prototype.update;
     Radical.prototype.url = function() {
-        return "http://www.wanikani.com/radicals/" + this.character;
+        return "http://www.wanikani.com/" + this.referenceName + "/" + this.character;
     };
     Radical.prototype.weblink = function(text, cls, doc) {
         var a = (doc || document).createElement('a');
@@ -300,7 +343,7 @@ var wanikani = (function(window, document) {
     };
 
     var RadicalCollection = function(radicals) {
-        this.update(radicals);
+        this.update(radicals || []);
     };
     RadicalCollection.prototype.update = function(data) {
         this.data = this.data || [];
@@ -323,12 +366,55 @@ var wanikani = (function(window, document) {
         }
         this.data.sort(fn);
     };
-    RadicalCollection.prototype.__storage_value = function() {
-        return this.data.map(function(e) {
-            return e.data;
-        });
+    RadicalCollection.prototype.cacheKey = function(character) {
+        return this.referenceName() + '/character-' + character.character;
     };
+    RadicalCollection.prototype.levelCacheKey = function(level) {
+        return this.referenceName() + '/level-' + level;
+    };
+    RadicalCollection.prototype.cacheStore = function(user) {
+        // var set_levels = [], character;
+        for (var i=0; i<this.data.length; ++i) {
+            character = this.data[i];
+            // if (!(character.level in set_levels)) {
+            //     user.cacheSet(this.levelCacheKey(character.level), true);
+            //     set_levels.push(character.level);
+            // }
+            user.cacheSet(this.cacheKey(character), character.data);
+        }
+    };
+    RadicalCollection.prototype.has_level = function(level) {
+        // return user.cacheGet(this.levelCacheKey(level));
+        for (var i=0; i<this.data.length; ++i) {
+            if (this.data[i].level == level) {
+                return true;
+            }
+        }
+        return false;
+    };
+    RadicalCollection.prototype.has_argument = RadicalCollection.prototype.has_level;
+    RadicalCollection.prototype.filter_arguments = function(args) {
+        var new_args = [];
+        for (var i=0; i<args.length; ++i) {
+            if (!this.has_argument(args[i])) {
+                new_args.push(args[i]);
+            }
+        }
+        return new_args;
+    };
+    RadicalCollection.prototype.cacheLoad = function(user) {
+        var raw = user.cacheGetPrefix(this.referenceName() + '/character-');
+        var array = [];
+        for (var k in raw) {
+            array.push(raw[k]);
+        }
+        this.update(array);
+    };
+    RadicalCollection.prototype.filterStale = RadicalCollection.prototype.cacheLoad;
     RadicalCollection.prototype.entClass = Radical;
+    RadicalCollection.prototype.referenceName = function() {
+        return this.entClass.prototype.referenceName;
+    };
     RadicalCollection.prototype.toArray = function() {
         return this.data;
     };
@@ -345,12 +431,10 @@ var wanikani = (function(window, document) {
         this.update(data);
     };
     copy_prototype(Radical, Kanji);
-    Kanji.prototype.url = function() {
-        return "http://www.wanikani.com/kanji/" + this.character;
-    };
+    Radical.prototype.referenceName = 'kanji';
 
     KanjiCollection = function(kanji) {
-        this.update(kanji);
+        this.update(kanji || []);
     };
     copy_prototype(RadicalCollection, KanjiCollection);
     KanjiCollection.prototype.entClass = Kanji;
@@ -359,12 +443,10 @@ var wanikani = (function(window, document) {
         this.update(data);
     };
     copy_prototype(Radical, Vocab);
-    Vocab.prototype.url = function() {
-        return "http://www.wanikani.com/vocabulary/" + this.character;
-    };
+    Radical.prototype.referenceName = 'vocabulary';
 
-    VocabCollection = function(kanji) {
-        this.update(kanji);
+    VocabCollection = function(vocab) {
+        this.update(vocab || []);
     };
     copy_prototype(RadicalCollection, VocabCollection);
     VocabCollection.prototype.entClass = Vocab;
@@ -372,27 +454,13 @@ var wanikani = (function(window, document) {
 
     var User = function(api_key) {
         this.api_key = api_key;
-
-        var cache_check, field_type;
-        for (var k in this.field_formats) {
-            field_type = this.field_formats[k];
-            cache_check = this.cache_get(k);
-            if (cache_check) {
-                if (field_type) {
-                    this[k] = new field_type(cache_check);
-                } else {
-                    this[k] = cache_check;
-                }
-            } else {
-                this[k] = null;
-            }
-        }
+        this.load_from_cache();
 
         // These callbacks fire after every successful query
         this._onsuccess = [];
     };
     User.prototype.field_formats = {
-        user_information: UserInformation,
+        information: UserInformation,
         study_queue: null,
         level_progression: null,
         srs_distribution: null,
@@ -402,30 +470,58 @@ var wanikani = (function(window, document) {
         kanji: KanjiCollection,
         vocabulary: VocabCollection
     };
-    User.prototype.api_uri = function() {
+    User.prototype.load_from_cache = function() {
+        var cache_check, field_type;
+        for (var k in this.field_formats) {
+            field_type = this.field_formats[k];
+            if (field_type && field_type.prototype.cacheLoad) {
+                this[k] = new field_type();
+                this[k].cacheLoad(this);
+            } else {
+                cache_check = this.cacheGet(k);
+                if (cache_check) {
+                    if (field_type) {
+                        this[k] = new field_type(cache_check);
+                    } else {
+                        this[k] = cache_check;
+                    }
+                } else {
+                    this[k] = null;
+                }
+            }
+        }
+    };
+    User.prototype.apiURI = function() {
         var args = Array.prototype.slice.call(arguments, 0);
         args.unshift(this.api_key);
-        return get_uri.apply(null, args);
+        return getURI.apply(null, args);
     };
     User.prototype.__unique_key = function() {
         return 'wk-user/' + this.api_key;
     };
-    User.prototype.cache_set = function(key, value) {
+    User.prototype.cacheSet = function(key, value) {
         return storage.setValue(this.__unique_key() + '/' + key, value);
     };
-    User.prototype.cache_get = function(key) {
+    User.prototype.cacheGet = function(key) {
         return storage.getValue(this.__unique_key() + '/' + key);
     };
-    User.prototype.cache_empty = function() {
-        for (var k in this.field_formats) {
-            storage.deleteKey(this.__unique_key() + '/' + k);
-        }
+    User.prototype.cacheGetPrefix = function(prefix) {
+        return storage.getPrefix(this.__unique_key() + '/' + prefix);
     };
+    User.prototype.cacheEmpty = function() {
+        storage.deletePrefix(this.__unique_key());
+    };
+    User.prototype.clear = function() {
+        // Forget everything about this user.
+        this.cacheEmpty();
+        this.load_from_cache();
+    };
+    User.prototype.forget = User.prototype.clear;
     User.prototype.__query = function(resource, success, error, args, context) {
         var self = this;
         var success_wrapper = function(response) {
             if (response.error) {
-                error.call(self, arguments);
+                error.call(self, response.error);
             } else {
                 self.onsuccess.apply(self, arguments);
                 success.apply(context, arguments);
@@ -437,16 +533,16 @@ var wanikani = (function(window, document) {
             args = '';
         }
 
-        jsonp_query(this.api_uri(resource, args), success_wrapper, error, context);
+        jsonp_query(this.apiURI(resource, args), success_wrapper, error, context);
     };
     User.prototype.onsuccess = function(response) {
         if (response.user_information) {
-            if (this.user_information) {
-                this.user_information.update(response.user_information);
+            if (this.information) {
+                this.information.update(response.user_information);
             } else {
-                this.user_information = new UserInformation(response.user_information);
+                this.information = new UserInformation(response.user_information);
             }
-            this.cache_set('user_information', response.user_information);
+            this.cacheSet('information', response.user_information);
         }
         for (var i; i<this._onsuccess.length; i++) {
             try {
@@ -456,13 +552,19 @@ var wanikani = (function(window, document) {
             }
         }
     };
-    User.prototype.withUserInfo = function() {
+    User.prototype.withInfo = function() {
         var promise = new SimplePromise();
-        if (this.user_information) {
+        if (this.information) {
             promise.doSuccess(this);
         } else {
-            this.__query('user-information', 
-                function() { promise.doSuccess.apply(promise, arguments); },
+            var self = this;
+            var success_wrapper = function(response) {
+                self.onsuccess(response);
+                promise.doSuccess(self);
+            };
+
+            this.__query('user-information',
+                success_wrapper,
                 function() { promise.doError.apply(promise, arguments); }
             );
         }
@@ -473,22 +575,10 @@ var wanikani = (function(window, document) {
         var wrapper = User.prototype.field_formats[key_name];
         return function() {
             var required_args = Array.prototype.slice.call(arguments, 0);
-            var arg_key = key_name + '/args';
-            var cached_arguments = this.cache_get(arg_key);
-
-            if (required_args.length > 0 && cached_arguments && cached_arguments.length > 0) {
-                var i, j;
-                for (i=0; i<cached_arguments.length; ++i) {
-                    j = 0;
-                    while (j < required_args.length) {
-                        if (required_args[j] == cached_arguments[i]) {
-                            required_args = required_args.splice(j, 1);
-                        } else {
-                            ++j;
-                        }
-                    }
-                }
+            if (this[key_name] && this[key_name].filter_arguments) {
+                required_args = this[key_name].filter_arguments(required_args);
             }
+
 
             var promise = new SimplePromise();
             if (this[key_name] && required_args.length === 0) {
@@ -497,37 +587,25 @@ var wanikani = (function(window, document) {
                 var self = this;
                 var success = function(response) {
                     if (wrapper) {
-                        if (this[key_name]) {
-                            this[key_name].update(response.requested_information);
+                        if (self[key_name]) {
+                            self[key_name].update(response.requested_information);
                         } else {
-                            this[key_name] = new wrapper(response.requested_information);
+                            self[key_name] = new wrapper(response.requested_information);
                         }
                     } else {
-                        this[key_name] = response.requested_information;
+                        self[key_name] = response.requested_information;
                     }
-                    if (this[key_name].__storage_value) {
-                        this.cache_set(key_name, this[key_name].__storage_value());
+                    if (self[key_name].cacheStore) {
+                        self[key_name].cacheStore(self);
                     } else {
-                        this.cache_set(key_name, this[key_name]);
+                        self.cacheSet(key_name, self[key_name]);
                     }
 
-                    if (required_args.length > 0) {
-                        var queried_args = this.cache_get(arg_key);
-                        if (queried_args) {
-                            for (var i=0; i<required_args.length; i++) {
-                                queried_args.push(required_args[i]);
-                            }
-                        } else {
-                            queried_args = required_args;
-                        }
-                        this.cache_set(arg_key, queried_args);
-                    }
-
-
-                    promise.doSuccess(this);
+                    self.onsuccess(response);
+                    promise.doSuccess(self);
                 };
 
-                this.__query(api_name, 
+                this.__query(api_name,
                     success,
                     function() { promise.doError.apply(promise, arguments); },
                     required_args,
@@ -538,9 +616,11 @@ var wanikani = (function(window, document) {
         };
     };
     User.prototype.withStudyQueue = _generate_query_fn(
+        // No available arguments
         "study-queue", "study_queue"
     );
     User.prototype.withLevelProgression = _generate_query_fn(
+        // No Available arguments
         "level-progression", "level_progression"
     );
     User.prototype.witSRSDistribution = _generate_query_fn(
@@ -567,9 +647,50 @@ var wanikani = (function(window, document) {
         "vocabulary", "vocabulary"
     );
 
+    // SRS Card Levels
+    var levels = {
+        "apprentice": {
+            "level": 0,
+            "colors": {
+                "dark": "FF00AA",
+                "light": "DD0093"
+            }
+        },
+        "guru": {
+            "level": 1,
+            "colors": {
+                "dark": "AA38C6",
+                "light": "882D9E"
+            }
+        },
+        "master": {
+            "level": 2,
+            "colors": {
+                "dark": "5571E2",
+                "light": "294BBD"
+            }
+        },
+        "enlighten": {
+            "level": 3,
+            "colors": {
+                "dark": "00AAFF",
+                "light": "0093DD"
+            }
+        },
+        "burned": {
+            "level": 4,
+            "colors": {
+                "dark": "555555",
+                "light": "434343"
+            }
+        }
+    };
+
     return {
         JSONP: JSONP,
         setMaxCacheTime: storage.setMaxAge,
+        levels: levels,
+        // storage: storage,
         getUser: function(api_key) {
             if (!users[api_key]) {
                 users[api_key] = new User(api_key);
@@ -577,7 +698,7 @@ var wanikani = (function(window, document) {
             return users[api_key];
         },
         forgetUser: function(api_key) {
-            users[api_key].cache_empty();
+            users[api_key].cacheEmpty();
             delete users[api_key];
         }
     };
