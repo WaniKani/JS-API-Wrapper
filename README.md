@@ -10,7 +10,7 @@ First writing/test version. Need to add comments, testing, documentation, ...
     - Queries are cached (and stored in localStorage where available) to
         avoid duplicate queries
         - Takes query arguments into account
-        - By default, data expires after 24 hours.
+        - By default, data expires after 2 hours.
     - Several Helper function
         - TODO: list helpers/wrappers
 
