@@ -69,6 +69,19 @@ var wanikani = (function(window, document) {
         var setMaxAge = function(milliseconds) {
             max_lifespan = milliseconds;
         };
+        var getMaxAge = function() {
+            return max_lifespan;
+        };
+        var withMaxAge = function(age, fn, context) {
+            age = age === null || age === undefined ? max_lifespan : age;
+            var old_max = getMaxAge();
+            setMaxAge(age);
+            try {
+                fn.call(context);
+            } finally {
+                setMaxAge(old_max);
+            }
+        };
 
         var cleanup = function() {
             for (var k in cache) {
@@ -129,6 +142,8 @@ var wanikani = (function(window, document) {
             deleteKey: deleteKey,
             hasKey: hasKey,
             setMaxAge: setMaxAge,
+            getMaxAge: getMaxAge,
+            withMaxAge: withMaxAge,
             cleanup: cleanup,
             getPrefix: getPrefix,
             deletePrefix: deletePrefix
@@ -364,18 +379,12 @@ var wanikani = (function(window, document) {
         return this.referenceName() + '/level-' + level;
     };
     RadicalCollection.prototype.cacheStore = function(user) {
-        // var set_levels = [], character;
         for (var i=0; i<this.data.length; ++i) {
             character = this.data[i];
-            // if (!(character.level in set_levels)) {
-            //     user.cacheSet(this.levelCacheKey(character.level), true);
-            //     set_levels.push(character.level);
-            // }
             user.cacheSet(this.cacheKey(character), character.data);
         }
     };
     RadicalCollection.prototype.has_level = function(level) {
-        // return user.cacheGet(this.levelCacheKey(level));
         for (var i=0; i<this.data.length; ++i) {
             if (this.data[i].level == level) {
                 return true;
@@ -464,6 +473,7 @@ var wanikani = (function(window, document) {
     User.prototype.load_from_cache = function() {
         var cache_check, field_type;
         for (var k in this.field_formats) {
+            this[k] = null;
             field_type = this.field_formats[k];
             if (field_type && field_type.prototype.cacheLoad) {
                 this[k] = new field_type();
@@ -476,11 +486,14 @@ var wanikani = (function(window, document) {
                     } else {
                         this[k] = cache_check;
                     }
-                } else {
-                    this[k] = null;
                 }
             }
         }
+    };
+    User.prototype.ensureFresh = function(max_age_milliseconds) {
+        storage.withMaxAge(max_age_milliseconds, function() {
+            this.load_from_cache();
+        }, this);
     };
     User.prototype.apiURI = function() {
         var args = Array.prototype.slice.call(arguments, 0);
