@@ -244,7 +244,7 @@ var wanikani = (function(window, document) {
             "username": STRING,
             "gravatar": STRING(32),
             "level": INT,
-            "title": STRING { "unseen", "guppie", "apprentice", "guru", "master", "enlightened", "burned"},
+            "title": STRING { "unseen", "apprentice", "guru", "master", "enlightened", "burned"},
 
     "unseen": "rgb(40, 40, 40)",
     "apprentice": "rgb(221, 0, 147)",
