@@ -19,6 +19,24 @@
         - current argument caching wont work with critical-items and
             recent-unlocks
 
+
+    Expected Future Changes:
+        - `*.data` won't be copied to the parent element.
+            - this means, for example, access to username will not be able to
+                be done as  `user.information.username`.
+            - Will change to `user.information.username()`
+            - Access to unsupported values through the data object
+                `user.information.data.key`
+
+        - Give everything a basic interface
+            - Collections
+                - sort(); -> null
+                - cacheStore(); -> null
+                - cacheLoad(); -> null;
+                - canShortcut(user, args); -> bool;
+            - Item
+                - isSameAs(json_representation); -> bool;
+
 */
 
 var wanikani = (function(window, document) {
@@ -254,6 +272,10 @@ var wanikani = (function(window, document) {
         }
     };
 
+    var common_toJSON = function() {
+        return this.data;
+    };
+
     var UserInformation = function(data) {
         /*
             "username": STRING,
@@ -276,6 +298,7 @@ var wanikani = (function(window, document) {
             this[k] = data[k];
         }
     };
+    UserInformation.prototype.toJSON = common_toJSON;
     UserInformation.prototype.avatar_url = function(size) {
         // Get Gravatar URL
         var url = 'http://www.gravatar.com/avatar/' + this.gravatar;
@@ -319,6 +342,7 @@ var wanikani = (function(window, document) {
     var Radical = function(data) {
         this.update(data);
     };
+    Radical.prototype.toJSON = common_toJSON;
     Radical.prototype.referenceName = 'radicals';
     Radical.prototype.update = UserInformation.prototype.update;
     Radical.prototype.url = function() {
@@ -351,6 +375,7 @@ var wanikani = (function(window, document) {
     var RadicalCollection = function(radicals) {
         this.update(radicals || []);
     };
+    RadicalCollection.prototype.toJSON = common_toJSON;
     RadicalCollection.prototype.update = function(data) {
         this.data = this.data || [];
         var c;
@@ -402,6 +427,39 @@ var wanikani = (function(window, document) {
         }
         return new_args;
     };
+    RadicalCollection.prototype.canShortcut = function(user, args) {
+        // Return true if the given args are already present, and a query can
+        // be skipped.
+        console.log('testing if shortcut is possible');
+        if (user.information.level === undefined) {
+            // Don't know what level we can query up to - so this can not
+            // be skipped
+            console.log('user level unknown, cant shortcut');
+            return false;
+        }
+        // For a radical/kanji/vocab query, the arguments are the levels to
+        // query, defaulting to all up to the users level.
+        // if we find any level that hasn't been queried, we can't shortcut
+        args = args || [];
+        var i = 1;  // Start at one because there is no level 0 :)
+        if (args.length === 0) {
+            for (; i<user.information.level; ++i) {
+                if (!this.has_level(i)) {
+                    console.log('User level missing', i);
+                    return false;
+                }
+            }
+        } else {
+            for (; i<args.length; ++i) {
+                if (!this.has_level(i)) {
+                    console.log('requested level missing', i);
+                    return false;
+                }
+            }
+        }
+        // We already have all the queried levels, so we can shortcut safely!
+        return true;
+    };
     RadicalCollection.prototype.cacheLoad = function(user) {
         var raw = user.cacheGetPrefix(this.referenceName() + '/character-');
         var array = [];
@@ -425,6 +483,23 @@ var wanikani = (function(window, document) {
             }
         }
         return undefined;
+    };
+    RadicalCollection.prototype.getLevels = function() {
+        // Returns all characters, the level of which was included in the
+        // arguments. E.g., getLevels(1,3,5) wil lreturn all kana of levels
+        // 1, 3 and 5.
+        var items = [], check = {}, i;
+        for (i=0; i<arguments.length; i++) {
+            // We have to do this otherwise the "in" check later will be
+            // checking against index, not value.
+            check[arguments[i]] = true;
+        }
+        for (i=0; i<this.data.length; ++i) {
+            if (this.data[i].level in check) {
+                items.push(this.data[i]);
+            }
+        }
+        return items;
     };
 
     var Kanji = function(data) {
@@ -452,6 +527,7 @@ var wanikani = (function(window, document) {
     VocabCollection.prototype.entClass = Vocab;
 
 
+    
     var User = function(api_key) {
         this.api_key = api_key;
         this.load_from_cache();
@@ -578,14 +654,23 @@ var wanikani = (function(window, document) {
     var _generate_query_fn = function(api_name, key_name) {
         var wrapper = User.prototype.field_formats[key_name];
         return function() {
-            var required_args = Array.prototype.slice.call(arguments, 0);
-            if (this[key_name] && this[key_name].filter_arguments) {
-                required_args = this[key_name].filter_arguments(required_args);
+            var args = Array.prototype.slice.call(arguments, 0);
+            var o = this[key_name];
+            if (o && o.filter_arguments) {
+                args = o.filter_arguments(args);
             }
+
+            // if (this[key_name] && this[key_name].unique_argument !== undefined) {
+            //     // If this is defined, swap to "unqiue_argument" mode.
+            //     // If the given argument is not the same as the last argument,
+            //     // clear the object and requery the information.
+            // }
 
 
             var promise = new SimplePromise();
-            if (this[key_name] && required_args.length === 0) {
+            var shortcut = o.canShortcut === undefined || o.canShortcut(user, args);
+            if (o && args.length === 0 && shortcut) {
+                console.log('shortcut');
                 promise.doSuccess(this);
             } else {
                 var self = this;
@@ -612,7 +697,7 @@ var wanikani = (function(window, document) {
                 this.__query(api_name,
                     success,
                     function() { promise.doError.apply(promise, arguments); },
-                    required_args,
+                    args,
                     this
                 );
             }
