@@ -20,6 +20,6 @@ First writing/test version. Need to add comments, testing, documentation, ...
     user = wanikani.getUser(API_KEY);
 
     // Get User Information
-    user.withUserInfo().do(function(user) {
-        console.log(user.user_information.username);
+    user.withUserInfo().then(function(user) {
+        console.log(user.info.username());
     });

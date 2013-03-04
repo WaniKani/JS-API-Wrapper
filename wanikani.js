@@ -241,6 +241,7 @@ var wanikani = (function(window, document) {
 
 
     var JSONP = {
+        // TODO: Abstract this away so it's not tied to JSONP-style requests
         callbacks: {},
         nextID: 0,
         globalize: function(fn, context) {
@@ -369,6 +370,7 @@ var wanikani = (function(window, document) {
         */
         // identifyingKeys: ["character", "type"],
         identityKey: 'username',
+        subIdentityKey: null,
         update: function(data) {
             /**
             * Update this object with new information. This is a total
@@ -390,7 +392,13 @@ var wanikani = (function(window, document) {
             * @method isSameAs
             * @param {Object}
             */
-            return this.data[this.identityKey] == json[this.identityKey];
+            return (
+                (this.data[this.identityKey] == json[this.identityKey]) && (
+                    !this.subIdentityKey || (
+                        this.data[this.subIdentityKey] == json[this.subIdentityKey]
+                    )
+                )
+            );
         },
         cacheKey: function() {
             throw "Undefined CacheKey";
@@ -628,8 +636,9 @@ var wanikani = (function(window, document) {
             }
         },
         has_level: function(level) {
+            console.log('checking', level);
             for (var i=0; i<this.data.length; ++i) {
-                if (this.data[i].level == level) {
+                if (this.data[i].level() == level) {
                     return true;
                 }
             }
@@ -659,6 +668,53 @@ var wanikani = (function(window, document) {
                 }
             }
             return items;
+        },
+        canShortcut: function(user, args) {
+            // Return true if the given args are already present, and a query can
+            // be skipped.
+            if (user.info.level === undefined) {
+                // Don't know what level we can query up to - so this can not
+                // be skipped
+                return false;
+            }
+            // For a radical/kanji/vocab query, the arguments are the levels to
+            // query, defaulting to all up to the users level.
+            // if we find any level that hasn't been queried, we can't shortcut
+            args = args || [];
+            console.log(args);
+            var i;
+            if (args.length === 0) {
+                // Start at one because there is no level 0 :)
+                for (i=1; i<user.info.level(); ++i) {
+                    if (!this.has_level(args[i])) {
+                        return false;
+                    }
+                }
+            } else {
+                for (i=0; i<args.length; ++i) {
+                    console.log(args[i]);
+                    if (!this.has_level(args[i])) {
+                        console.log('cannot shortcut (missing', args[i], ')');
+                        return false;
+                    }
+                }
+            }
+            // We already have all the queried levels, so we can shortcut safely!
+            console.log('can shortcut');
+            return true;
+        },
+        filter_arguments: function(args) {
+            var new_args = [];
+            for (var i=0; i<args.length; ++i) {
+                if (!this.has_argument(args[i])) {
+                    new_args.push(args[i]);
+                }
+            }
+            if (args.length > 0 && new_args.length === 0) {
+                // Everything asked for is available
+                return null;
+            }
+            return new_args;
         }
     };
 
@@ -695,7 +751,8 @@ var wanikani = (function(window, document) {
         character: Types.String,
         meaning: Types.String,
         image: Types.NullOr(Types.String),
-        level: Types.Integer
+        level: Types.Integer,
+        percentage: Types.NullOr(Types.Percentage)
         // stats: Types.Object
     };
     add_data_types(Radical, Radical.known_data_keys);
@@ -703,7 +760,8 @@ var wanikani = (function(window, document) {
     class_implements(Radical, ItemInterface);
     class_implements(Radical, KanaInterface, {
         referenceName: 'radical',
-        statsClass: CharacterStats
+        statsClass: CharacterStats,
+        subIdentityKey: 'type'
     });
 
 
@@ -719,52 +777,6 @@ var wanikani = (function(window, document) {
         }
     });
 
-    // RadicalCollection.prototype.has_argument = RadicalCollection.prototype.has_level;
-    // RadicalCollection.prototype.filter_arguments = function(args) {
-    //     var new_args = [];
-    //     for (var i=0; i<args.length; ++i) {
-    //         if (!this.has_argument(args[i])) {
-    //             new_args.push(args[i]);
-    //         }
-    //     }
-    //     return new_args;
-    // };
-    // RadicalCollection.prototype.canShortcut = function(user, args) {
-    //     // Return true if the given args are already present, and a query can
-    //     // be skipped.
-    //     console.log('testing if shortcut is possible');
-    //     if (user.information.level === undefined) {
-    //         // Don't know what level we can query up to - so this can not
-    //         // be skipped
-    //         console.log('user level unknown, cant shortcut');
-    //         return false;
-    //     }
-    //     // For a radical/kanji/vocab query, the arguments are the levels to
-    //     // query, defaulting to all up to the users level.
-    //     // if we find any level that hasn't been queried, we can't shortcut
-    //     args = args || [];
-    //     var i = 1;  // Start at one because there is no level 0 :)
-    //     if (args.length === 0) {
-    //         for (; i<user.information.level; ++i) {
-    //             if (!this.has_level(i)) {
-    //                 console.log('User level missing', i);
-    //                 return false;
-    //             }
-    //         }
-    //     } else {
-    //         for (; i<args.length; ++i) {
-    //             if (!this.has_level(i)) {
-    //                 console.log('requested level missing', i);
-    //                 return false;
-    //             }
-    //         }
-    //     }
-    //     // We already have all the queried levels, so we can shortcut safely!
-    //     return true;
-    // };
-
-
-
     var Kanji = function(data) {
         this.update(data);
     };
@@ -774,14 +786,16 @@ var wanikani = (function(window, document) {
         onyomi: Types.String,
         kunyomi: Types.String,
         important_reading: Types.String,
-        level: Types.Integer
+        level: Types.Integer,
+        percentage: Types.NullOr(Types.Percentage)
         // stats: Types.Object
     };
     add_data_types(Kanji, Kanji.known_data_keys);
     class_implements(Kanji, ItemInterface);
     class_implements(Kanji, KanaInterface, {
         referenceName: 'kanji',
-        statsClass: CharacterStats  // They are the same :)
+        statsClass: CharacterStats,  // They are the same :)
+        subIdentityKey: 'type'
     });
 
     var KanjiCollection = function(kanji) {
@@ -803,14 +817,16 @@ var wanikani = (function(window, document) {
         character: Types.String,
         kana: Types.String,
         meaning: Types.String,
-        level: Types.Integer
+        level: Types.Integer,
+        percentage: Types.NullOr(Types.Percentage)
         // stats: Types.Object
     };
     add_data_types(Vocab, Vocab.known_data_keys);
     class_implements(Vocab, ItemInterface);
     class_implements(Vocab, KanaInterface, {
         referenceName: 'vocabulary',
-        statsClass: CharacterStats  // They are the same :)
+        statsClass: CharacterStats,  // They are the same :)
+        subIdentityKey: 'type'
     });
 
     var VocabCollection = function(kanji) {
@@ -825,12 +841,294 @@ var wanikani = (function(window, document) {
         }
     });
 
+    var StudyQueue = function(data) {
+        this.data =  data;
+    };
+    StudyQueue.prototype.known_data_types = {
+        lessions_available: Types.Integer,
+        reviews_available: Types.Integer,
+        next_review_date: Types.Date,
+        reviews_available_next_hour: Types.Integer,
+        reviews_available_next_day: Types.Integer
+    };
+    add_data_types(StudyQueue, StudyQueue.known_data_keys);
+
+    var LevelProgression = function(data) {
+        this.data =  data;
+    };
+    LevelProgression.prototype.known_data_types = {
+        radicals_progress: Types.Integer,
+        radicals_total: Types.Integer,
+        kanji_progress: Types.Integer,
+        kanji_total: Types.Integer
+    };
+    add_data_types(LevelProgression, LevelProgression.known_data_keys);
+
+
+    var RecentUnlocksCollection = function(data) {
+        this.update(data || []);
+    };
+    class_implements(RecentUnlocksCollection, CollectionInterface);
+    class_implements(RecentUnlocksCollection, CharacterCollectionInterface);
+    extend(RecentUnlocksCollection, {
+        itemClass: null,
+        referenceName: 'recent-unlocks',
+        update: function(items) {
+            if (this.data === null || this.data === undefined) {
+                this.data = [];
+            }
+            var item;
+            for (var i=0; i<items.length; ++i) {
+                item = this.getByJSON(items[i]);
+                if (item === undefined) {
+                    if (items[i].type == 'kanji') {
+                        item = new Kanji(items[i]);
+                    } else if (items[i].type == 'radical') {
+                        item = new Radical(items[i]);
+                    } else if (items[i].type == 'vocabulary') {
+                        item = new Vocab(items[i]);
+                    }
+                    this.data.push(item);
+                } else {
+                    item.update(items[i]);
+                }
+            }
+            this.sort();
+        },
+        cacheKey: function() {
+            return 'recent-unlocks';
+        },
+        canShortcut: function(limit) {
+            //Declaring a limit is available, as seen in the example as 3
+            // The limit can be a minimum of 1 and a maximum of 100.
+            // If the limit argument is not specified or outside the range, a default of 10 will be used.
+            if (limit === null || limit === undefined || limit < 1 || limit > 100) {
+                limit = 10;
+            }
+            return limit <= data.length;
+        },
+        filter_arguments: function(limit) {
+            limit = limit[0];
+            if (limit === null || limit === undefined || limit < 1 || limit > 100) {
+                limit = 10;
+            }
+            if (limit <= this.data.length) {
+                // Everything asked for is available
+                return null;
+            }
+            return [limit];
+        },
+        cacheLoad: function(storage) {
+            storage = storage.getChild(this.cacheKey());
+            var new_data = [], stored = storage.toObject();
+            for (var k in stored) {
+                new_data.push(stored[k]);
+            }
+            this.update(new_data);
+        },
+        cacheDump: function(storage) {
+            console.log('new dumper');
+            storage = storage.getChild(this.cacheKey());
+            var character;
+            for (var i=0; i<this.data.length; ++i) {
+                character = this.data[i];
+                storage.set(character.referenceName + '/' +character.character(), character.data);
+            }
+        },
+        getByTypeCharacter: function(type, character) {
+            var c;
+            for (var i=0; i<this.data.length; ++i) {
+                c = this.data[i];
+                if (c.type() == type && c.character() == character) {
+                    result.push(this.data[i]);
+                }
+            }
+        },
+        getByCharacter: function(character) {
+            var result = [];
+            for (var i=0; i<this.data.length; ++i) {
+                if (this.data[i].character() == character) {
+                    result.push(this.data[i]);
+                }
+            }
+            return result;
+        }
+    });
+
+    var CriticalItemsCollection = function(data) {
+        this.update(data || []);
+    };
+    class_implements(CriticalItemsCollection, CollectionInterface);
+    class_implements(CriticalItemsCollection, CharacterCollectionInterface);
+    extend(CriticalItemsCollection, {
+        itemClass: null,
+        referenceName: 'critical-items',
+        update: function(items) {
+            if (this.data === null || this.data === undefined) {
+                this.data = [];
+            }
+            var item;
+            for (var i=0; i<items.length; ++i) {
+                item = this.getByJSON(items[i]);
+                if (item === undefined) {
+                    if (items[i].type == 'kanji') {
+                        item = new Kanji(items[i]);
+                    } else if (items[i].type == 'radical') {
+                        item = new Radical(items[i]);
+                    } else if (items[i].type == 'vocabulary') {
+                        item = new Vocab(items[i]);
+                    }
+                    this.data.push(item);
+                } else {
+                    item.update(items[i]);
+                }
+            }
+            this.sort();
+        },
+        cacheKey: function() {
+            return 'critical-items';
+        },
+        canShortcut: function(limit) {
+            // This one is a little more "guess-y"
+            if (limit === null || limit === undefined || limit < 0 || limit > 100) {
+                limit = 75;
+            }
+            for (var i=0; i < this.data.length; ++i) {
+                if (this.data[i].percentage() >= limit) {
+                    return true;
+                }
+            }
+            return false;
+        },
+        filter_arguments: function(limit) {
+            limit = limit[0];
+            if (limit === null || limit === undefined || limit < 0 || limit > 100) {
+                limit = 75;
+            }
+            for (var i=0; i < this.data.length; ++i) {
+                if (this.data[i].percentage() >= limit) {
+                    return null;
+                }
+            }
+            return [limit];
+        },
+        cacheLoad: function(storage) {
+            storage = storage.getChild(this.cacheKey());
+            var new_data = [], stored = storage.toObject();
+            for (var k in stored) {
+                new_data.push(stored[k]);
+            }
+            this.update(new_data);
+        },
+        cacheDump: function(storage) {
+            console.log('new dumper');
+            storage = storage.getChild(this.cacheKey());
+            var character;
+            for (var i=0; i<this.data.length; ++i) {
+                character = this.data[i];
+                storage.set(character.referenceName + '/' +character.character(), character.data);
+            }
+        },
+        getByTypeCharacter: function(type, character) {
+            var c;
+            for (var i=0; i<this.data.length; ++i) {
+                c = this.data[i];
+                if (c.type() == type && c.character() == character) {
+                    result.push(this.data[i]);
+                }
+            }
+        },
+        getByCharacter: function(character) {
+            var result = [];
+            for (var i=0; i<this.data.length; ++i) {
+                if (this.data[i].character() == character) {
+                    result.push(this.data[i]);
+                }
+            }
+            return result;
+        }
+    });
+
+    var SRSDistribution = function(data) {
+        this.data = data;
+    };
+    SRSDistribution.prototype.known_data_types = {
+        radicals: Types.Integer,
+        kanji: Types.Integer,
+        vocab: Types.Integer,
+        total: Types.Integer
+    };
+    add_data_types(SRSDistribution, SRSDistribution.known_data_keys);
+
+    var SRSDistibutionCollection = function(data) {
+        this.update(data);
+    };
+
+
 
     var User = function(api_key) {
         this.api_key = api_key;
         this.storage = storage.getChild('user/' + api_key);
         this._load_from_cache();
     };
+    User.prototype.field_formats = {
+        info: UserInformation,
+        study_queue: StudyQueue,
+        level_progression: LevelProgression,
+        srs_distribution: null,
+        recent_unlocks: RecentUnlocksCollection,
+        critical_items: CriticalItemsCollection,
+        radicals: RadicalCollection,
+        kanji: KanjiCollection,
+        vocabulary: VocabCollection
+    };
+
+    var _generate_query_fn = function(api_name, key_name) {
+        var Wrapper = User.prototype.field_formats[key_name];
+        return function() {
+            var args = Array.prototype.slice.call(arguments, 0);
+            var gave_arguments = args.length > 0;
+            var o = this[key_name];
+            if (o && o.filter_arguments) {
+                args = o.filter_arguments(args);
+            }
+
+            var promise = new SimplePromise();
+            var has_shortcut = o && o.canShortcut === undefined;
+            if ((gave_arguments && args === null) || (has_shortcut && o.canShortcut(this, args))) {
+                promise.resolve(this);
+            } else {
+                var self = this;
+                var success = function(response) {
+                    if (Wrapper) {
+                        if (self[key_name]) {
+                            self[key_name].update(response.requested_information);
+                        } else {
+                            self[key_name] = new Wrapper(response.requested_information);
+                        }
+                    } else {
+                        self[key_name] = response.requested_information;
+                    }
+                    if (self[key_name].cacheDump) {
+                        self[key_name].cacheDump(self.storage);
+                    } else {
+                        this.storage.set(key_name, self[key_name]);
+                    }
+                    self._response_success(response);
+                    promise.resolve(self);
+                };
+
+                this.__query(api_name,
+                    success,
+                    function() { promise.reject.apply(promise, arguments); },
+                    args,
+                    this
+                );
+            }
+            return promise;
+        };
+    };
+
     class_implements(User, ItemInterface, {
         identityKey: 'username',
         getAPIURL: function() {
@@ -851,6 +1149,20 @@ var wanikani = (function(window, document) {
                 });
             }
             // TODO: reset all the data classes
+        },
+        getInfo: function() {
+            var promise = new SimplePromise();
+            if (this.info && this.info.data) {
+                promise.resolve(this);
+            } else {
+                var self = this;
+
+                this.__query('user-information',
+                    function() { promise.resolve.apply(promise, arguments); },
+                    function() { promise.reject.apply(promise, arguments); }
+                );
+            }
+            return promise;
         },
         _response_success: function(response) {
             /**
@@ -888,140 +1200,42 @@ var wanikani = (function(window, document) {
                     }
                 }
             }
-        }
-    });
-    User.prototype.field_formats = {
-        info: UserInformation,
-        study_queue: null,
-        level_progression: null,
-        srs_distribution: null,
-        recent_unlocks: null,
-        critical_items: null,
-        radicals: RadicalCollection,
-        kanji: KanjiCollection,
-        vocabulary: VocabCollection
-    };
-
-    User.prototype.__query = function(resource, success, error, args, context) {
-        var self = this;
-        var success_wrapper = function(response) {
-            if (response.error) {
-                error.call(self, response.error);
-            } else {
-                self._response_success.apply(self, arguments);
-                success.apply(context, arguments);
-            }
-        };
-        if (args && args.length > 0) {
-            args = args.map(function(e) { return e.toString(); }).join(',');
-        } else {
-            args = '';
-        }
-
-        // jsonp_query(this.getAPIURL(resource, args), success_wrapper, error, context);
-        JSONP.query(this.getAPIURL(resource, args), success_wrapper, error, context);
-    };
-    User.prototype.getInfo = function() {
-        var promise = new SimplePromise();
-        if (this.info && this.info.data) {
-            // promise.doSuccess(this);
-            promise.resolve(this);
-        } else {
+        },
+        __query: function(resource, success, error, args, context) {
             var self = this;
-
-            this.__query('user-information',
-                function() { promise.resolve.apply(promise, arguments); },
-                function() { promise.reject.apply(promise, arguments); }
-            );
-        }
-        return promise;
-    };
-
-    var _generate_query_fn = function(api_name, key_name) {
-        var Wrapper = User.prototype.field_formats[key_name];
-        return function() {
-            var args = Array.prototype.slice.call(arguments, 0);
-            var o = this[key_name];
-            if (o && o.filter_arguments) {
-                args = o.filter_arguments(args);
-            }
-
-            // if (this[key_name] && this[key_name].unique_argument !== undefined) {
-            //     // If this is defined, swap to "unqiue_argument" mode.
-            //     // If the given argument is not the same as the last argument,
-            //     // clear the object and requery the information.
-            // }
-
-
-            var promise = new SimplePromise();
-            var shortcut = o.canShortcut === undefined || o.canShortcut(user, args);
-            if (o && args.length === 0 && shortcut) {
-                // promise.doSuccess(this);
-                promise.resolve(this);
+            var success_wrapper = function(response) {
+                if (response.error) {
+                    error.call(self, response.error);
+                } else {
+                    self._response_success.apply(self, arguments);
+                    success.apply(context, arguments);
+                }
+            };
+            if (args && args.length > 0) {
+                args = args.map(function(e) { return e.toString(); }).join(',');
             } else {
-                var self = this;
-                var success = function(response) {
-                    if (Wrapper) {
-                        if (self[key_name]) {
-                            self[key_name].update(response.requested_information);
-                        } else {
-                            self[key_name] = new Wrapper(response.requested_information);
-                        }
-                    } else {
-                        self[key_name] = response.requested_information;
-                    }
-                    if (self[key_name].cacheStore) {
-                        self[key_name].cacheStore(self);
-                    } else {
-                        self.cacheSet(key_name, self[key_name]);
-                    }
-
-                    self._response_success(response);
-                    // promise.doSuccess(self);
-                    promise.resolve(self);
-                };
-
-                this.__query(api_name,
-                    success,
-                    function() { promise.reject.apply(promise, arguments); },
-                    args,
-                    this
-                );
+                args = '';
             }
-            return promise;
-        };
-    };
-    User.prototype.withStudyQueue = _generate_query_fn(
+
+            // jsonp_query(this.getAPIURL(resource, args), success_wrapper, error, context);
+            JSONP.query(this.getAPIURL(resource, args), success_wrapper, error, context);
+        },
         // No available arguments
-        "study-queue", "study_queue"
-    );
-    User.prototype.withLevelProgression = _generate_query_fn(
+        getStudyQueue: _generate_query_fn("study-queue", "study_queue"),
         // No Available arguments
-        "level-progression", "level_progression"
-    );
-    User.prototype.witSRSDistribution = _generate_query_fn(
-        "srs-distribution", "srs_distribution"
-    );
-    User.prototype.withRecentUnlocks = _generate_query_fn(
+        getLevelProgression: _generate_query_fn("level-progression", "level_progression"),
+        getSRSDistribution: _generate_query_fn("srs-distribution", "srs_distribution"),
         // takes a limit argument,  0-100
-        "recent-unlocks", "recent_unlocks"
-    );
-    User.prototype.withCriticalItems = _generate_query_fn(
+        getRecentUnlocks: _generate_query_fn("recent-unlocks", "recent_unlocks"),
         // takes a percentage argument,  0-100
-        "critical-items", "critical_items"
-    );
-    User.prototype.withRadicals = _generate_query_fn(
+        getCriticalItems: _generate_query_fn("critical-items", "critical_items"),
         // takes a level argument,  currently 1-30
-        "radicals", "radicals"
-    );
-    User.prototype.withKanji = _generate_query_fn(
+        getRadicals: _generate_query_fn("radicals", "radicals"),
         // takes a level argument,  currently 1-30
-        "kanji", "kanji"
-    );
-    User.prototype.withVocab = _generate_query_fn(
+        getKanji: _generate_query_fn("kanji", "kanji"),
         // takes a level argument,  currently 1-30
-        "vocabulary", "vocabulary"
-    );
+        getVocab: _generate_query_fn("vocabulary", "vocabulary")
+    });
 
     // SRS Card Levels
     var levels = {
