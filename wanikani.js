@@ -11,32 +11,9 @@
         user = wanikani.getUser(API_KEY);
 
         // Get User Information
-        user.withUserInfo().do(function(user) {
-            console.log(user.information.username);
+        user.withUserInfo().then(function(user) {
+            console.log(user.info.username());
         });
-
-    Known Issues:
-        - current argument caching wont work with critical-items and
-            recent-unlocks
-
-
-    Expected Future Changes:
-        - `*.data` won't be copied to the parent element.
-            - this means, for example, access to username will not be able to
-                be done as  `user.information.username`.
-            - Will change to `user.information.username()`
-            - Access to unsupported values through the data object
-                `user.information.data.key`
-
-        - Give everything a basic interface
-            - Collections
-                - sort(); -> null
-                - cacheStore(); -> null
-                - cacheLoad(); -> null;
-                - canShortcut(parent, args); -> bool;
-            - Item
-                - isSameAs(json_representation); -> bool;
-
 */
 
 var wanikani = (function(window, document) {
@@ -1280,11 +1257,8 @@ var wanikani = (function(window, document) {
         JSONP: JSONP,
         // setMaxCacheTime: storage.setMaxAge,
         levels: levels,
-        storage: storage,
+        // storage: storage,
         user_info: UserInformation,
-        radicals: RadicalCollection,
-        kanji: KanjiCollection,
-        vocab: VocabCollection,
         getUser: function(api_key) {
             if (!users[api_key]) {
                 users[api_key] = new User(api_key);
