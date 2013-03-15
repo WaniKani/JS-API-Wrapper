@@ -2,8 +2,7 @@
     JS WaniKani API Wrapper
     (c) 2012 Daniel Bowring
 
-    TODO: Comment everything, test it all.
-
+    TODO: testing
 
     Basic usage:
 
@@ -14,6 +13,127 @@
         user.withUserInfo().then(function(user) {
             console.log(user.info.username());
         });
+
+    Object Tree:
+        - User
+            - .getInfo() -> SimplePromise
+            - .getStudyQueue() -> SimplePromise
+            - .getLevelProgression() -> SimplePromise
+            - .getSRSDistribution() -> SimplePromise
+            - .getRecentUnlocks(count=10) -> SimplePromise
+            - .getCriticalItems(percentage=75) -> SimplePromise
+            - .getRadicals(level=1..user.info.level()) -> SimplePromise
+            - .getKanji(level=1..user.info.level()) -> SimplePromise
+            - .getVocab(level=1..user.info.level()) -> SimplePromise
+        - SimplePromise
+            - then(success=null, error=null, complete=null, context=null) -> SimplePromise
+            - onSuccess(fn, context=null) -> SimplePromise
+            - onError(fn, context=null) -> SimplePromise
+            - onComplete(fn, context=null) -> SimplePromise
+        - Character (Radical or Vocab or Kanji)
+            - .stats() -> CharacterStats
+            - .url() -> String // WaniKani URL
+            - .weblink(tetx, css_class='', doc=window.document) -> HTMLAnchorElement
+            - .isUnlocked() -> Boolean
+        - CharacterStats
+            - .srs() -> String
+            - .unlocked_data() -> Date
+            - .available_date() -> Date
+            - .burned() -> Boolean
+            - .burned_date() -> Date
+            - .meaning_correct() -> Integer or null
+            - .meaning_incorrect() -> Integer or null
+            - .meaning_max_streak() -> Integer or null
+            - .meaning_current_streak() -> Integer or null
+            - .reading_correct() -> Integer or null
+            - .reading_incorrect() -> Integer or null
+            - .reading_max_streak() -> Integer or null
+            - .reading_current_streak() -> Integer or null
+        - Radical
+            - .character() -> String
+            - .meaning() -> String
+            - .image() -> String or null
+            - .level() -> Integer
+            - .percentage() -> Integer or null
+        - Kanji
+            - .character() -> String
+            - .meaning() -> String
+            - .onyomi() -> String
+            - .kunyomi() -> String
+            - .important_reading() -> String
+            - .level() -> Integer
+            - .percentage() -> Integer or null
+        - Vocab
+            - .character() -> String
+            - .kana() -> String
+            - .meaning() -> String
+            - .level() -> Integer
+            - .percentage() -> Integer
+
+    User Interface:
+        (assuming user is a User instance)
+        - user.info -> UserInformation
+            - .username() -> String
+            - .gravatar() -> String
+            - .level() -> Integer
+            - .title() -> String
+            - .about() -> String
+            - .website() -> String or null
+            - .twitter() -> String
+            - .topics_count() -> Integer
+            - .creation_date -> Date
+            - .avatar_url(size=null) -> String
+            - .profile_url() -> String
+            - .twitter_url() -> String,
+            - .image(size, css_class='', doc=window.document) -> HTMLImageElement
+            - .weblink(text, css_class='', doc=window.document) -> HTMLAnchorElement
+            - .data -> Object (raw query data)
+        - user.study_queue -> StudyQueue
+            - .lessions_available() -> Integer
+            - .reviews_available() -> Integer
+            - .next_review_date() -> Date
+            - .reviews_available_next_hour() -> Integer
+            - .reviews_available_next_day() -> Integer
+            - .data -> Object // raw query data
+        - user.level_progression -> Object
+            - .radicals_progress() -> Integer
+            - .radicals_total() -> Integer
+            - .kanji_progress() -> Integer
+            - .kanji_total() -> Integer
+            - .data -> Object // raw query data
+        - user.srs_distribution -> Object
+            // Note that this is the raw data from the query
+            - .apprentice -> Object
+                - .radicals -> Integer
+                - .kanji -> Integer
+                - .vocabulary -> Integer
+                - .total -> Integer
+            -.guru, .master, .enlighten, .burn
+                // Same as .apprentice
+        - user.recent_unlocks -> RecentUnlocksCollection
+            - .getByTypeCharacter(type, character) -> Character or undefined
+                // Where type is 'radical', 'vocabulary' or 'kanji'
+            - .getByCharacter(character) -> Array[Character]
+            - .toArray() -> Array[Character]
+                // Note that you SHOULD NOT modify this array - it is a
+                // reference to the internal data store.
+                // If you require a copy, use .toArray().slice(0);
+        - user.critical_items -> CriticalItemsCollection
+            // Same as user.recent_unlocks
+        - user.radicals -> RadicalCollection
+            - .getByCharacter(character) -> Radical
+        - user.kanji -> KanjiCollection
+            // Same as user.radicals, but returns Kanji types
+        - user.vocabulary -> VocabCollection
+            // same as user.radicals, but returns Vocab types
+
+    General documentation on the API can be found at
+    http://www.wanikani.com/api
+    If you want to access a value that is not wrapped, use object.data[key]
+    Note, however, it will not be cached (and so may not always be present)
+
+    All objects support JSON serialization - for example:
+    user.wrapper.update(JSON.parse(JSON.generate(user.wrapper)))
 */
 
 var wanikani = (function(window, document) {
@@ -113,7 +233,7 @@ var wanikani = (function(window, document) {
                 if (key in cache) {
                     var stamped = JSON.parse(cache[key]);
                     if (isStale(stamped)) {
-                        deleteItem(key);
+                        removeItem(key);
                         return undefined;
                     }
                     return stamped.data;
@@ -904,7 +1024,6 @@ var wanikani = (function(window, document) {
             this.update(new_data);
         },
         cacheDump: function(storage) {
-            console.log('new dumper');
             storage = storage.getChild(this.cacheKey());
             var character;
             for (var i=0; i<this.data.length; ++i) {
@@ -917,7 +1036,7 @@ var wanikani = (function(window, document) {
             for (var i=0; i<this.data.length; ++i) {
                 c = this.data[i];
                 if (c.type() == type && c.character() == character) {
-                    result.push(this.data[i]);
+                    return c;
                 }
             }
         },
@@ -1061,18 +1180,25 @@ var wanikani = (function(window, document) {
     };
 
     var _generate_query_fn = function(api_name, key_name) {
+        /**
+         * This is used to generate (most) of the query functions.
+         * Takes care of argument filtering, shortcut testing and caching
+         */
         var Wrapper = User.prototype.field_formats[key_name];
         return function() {
             var args = Array.prototype.slice.call(arguments, 0);
             var gave_arguments = args.length > 0;
             var o = this[key_name];
             if (o && o.filter_arguments) {
+                // Remove any arguments that aren't needed (information
+                // already present)
                 args = o.filter_arguments(args);
             }
 
             var promise = new SimplePromise();
             var has_shortcut = o && o.canShortcut === undefined;
             if ((gave_arguments && args === null) || (has_shortcut && o.canShortcut(this, args))) {
+                // if (gave_arguments and filtered_all) or (has_shortcut and can_shortcut)
                 promise.resolve(this);
             } else {
                 var self = this;
@@ -1091,10 +1217,10 @@ var wanikani = (function(window, document) {
                     } else {
                         this.storage.set(key_name, self[key_name]);
                     }
+                    // Following ensures the user information is updated
                     self._response_success(response);
                     promise.resolve(self);
                 };
-
                 this.__query(api_name,
                     success,
                     function() { promise.reject.apply(promise, arguments); },
@@ -1114,20 +1240,41 @@ var wanikani = (function(window, document) {
             return getAPIURI.apply(null, args);
         },
         clear: function() {
+            /**
+             * Removes all information about this user from this object
+             * and the cache. After calling this, you will need to
+             * re-query any information
+             */
             this.storage.removePrefix();
-            // TODO: reset all the data classes
+            this._load_from_cache();
         },
         ensureFresh: function(max_age) {
+            /**
+             * Removes any information from the user that is based on stale
+             * information. Accepts one argument, a time (in seconds)
+             * representing the maximum time which a query can be considered
+             * "fresh"
+             * If you do not call this, stale information will remain until
+             * the instance is re-initialized
+             */
             if (arguments.length === 0) {
                 this.storage.removeStale();
             } else {
-                this.storage.withMaxAge(max_age, function(S) {
+                this.storage.withMaxAge(max_age, function(s) {
                     s.removeStale();
                 });
             }
-            // TODO: reset all the data classes
+            this._load_from_cache();
         },
         getInfo: function() {
+            /**
+             * Get basic user information. Most of the time you can avoid
+             * calling this, because all other queries will include this
+             * information
+             *
+             * @method getInfo
+             * @return SimplePromise
+             */
             var promise = new SimplePromise();
             if (this.info && this.info.data) {
                 promise.resolve(this);

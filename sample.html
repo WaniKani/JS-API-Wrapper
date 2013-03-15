@@ -67,7 +67,7 @@
             api_key = api_key.slice(1);  // Remove optional '/'
         }
         if (api_key.length != 32) {
-            container.innerText = 'invalid API key (wrong length)';
+            container.innerText = 'invalid API key (wrong length) - set as location.hash';
             return;
         }
 
@@ -77,48 +77,47 @@
         };
 
         var build_user_info = function(user) {
-            console.log(user.information);
-            container.appendChild(user.information.image(150, 'gravatar'));
+            container.appendChild(user.info.image(150, 'gravatar'));
             var e = document.createElement('h1');
-            e.innerText = user.information.username;
+            e.innerText = user.info.username();
             e.setAttribute('class', 'username');
             container.appendChild(e);
 
             e = document.createElement('h2');
-            e.innerText = user.information.title;
+            e.innerText = user.info.title();
             e.setAttribute('class', 'title');
             container.appendChild(e);
 
             e = document.createElement('div');
-            e.innerText = user.information.level;
+            e.innerText = user.info.level();
             e.setAttribute('class', 'level');
             container.appendChild(e);
 
-            container.appendChild(user.information.weblink('Website', 'website'));
+            container.appendChild(user.info.weblink('Website', 'website'));
 
             e = document.createElement('span');
-            e.innerText = user.information.topics_count;
+            e.innerText = user.info.topics_count();
             e.setAttribute('class', 'topics_count');
             container.appendChild(e);
 
             e = document.createElement('span');
-            e.innerText = user.information.posts_count;
+            e.innerText = user.info.posts_count();
             e.setAttribute('class', 'posts_count');
             container.appendChild(e);
 
             e = document.createElement('div');
-            e.innerText = user.information.created();
+            e.innerText = user.info.creation_date();
             e.setAttribute('class', 'creation_date');
             container.appendChild(e);
 
             e = document.createElement('div');
-            e.innerText = user.information.about || "Hi, I am " + user.information.username + '!';
+            e.innerText = user.info.about() || "Hi, I am " + user.info.username() + '!';
             e.setAttribute('class', 'about');
             container.appendChild(e);
         };
 
         var user = wanikani.getUser(api_key);
-        user.withInfo().use(build_user_info).onError(query_error);
+        user.getInfo().onSuccess(build_user_info).onError(query_error);
         return user;
     })();
 
