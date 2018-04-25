@@ -1203,13 +1203,8 @@ var wanikani = (function(window, document) {
             } else {
                 var self = this;
                 var success = function(response) {
-                    var requestedInfo = undefined;
                     //fix for api v1.4 where vocab is return as an object = { "general": [ <vocab list here> ] }
-                    if (key_name === "vocabulary") {
-                        requestedInfo = response.requested_information.general;
-                    } else {
-                        requestedInfo = response.requested_information;
-                    }
+                    var requestedInfo = (key_name === "vocabulary") ? response.requested_information.general : response.requested_information;
                     
                     if (Wrapper) {
                         if (self[key_name]) {
