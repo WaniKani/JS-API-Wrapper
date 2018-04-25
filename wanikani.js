@@ -140,7 +140,7 @@ var wanikani = (function(window, document) {
     "use strict";
     var users = {};
     var url_base = 'http://www.wanikani.com';
-    var api_path = 'api/v1.1/user';
+    var api_path = 'api/v1.4/user';
     var getURI = function() {
         var args = Array.prototype.slice.call(arguments, 0);
         args.unshift(url_base);
@@ -926,8 +926,8 @@ var wanikani = (function(window, document) {
         subIdentityKey: 'type'
     });
 
-    var VocabCollection = function(kanji) {
-        this.update(kanji || []);
+    var VocabCollection = function(vocab) {
+        this.update(vocab || []);
     };
     class_implements(VocabCollection, CollectionInterface);
     class_implements(VocabCollection, CharacterCollectionInterface, {
@@ -1203,14 +1203,17 @@ var wanikani = (function(window, document) {
             } else {
                 var self = this;
                 var success = function(response) {
+                    //fix for api v1.4 where vocab is return as an object = { "general": [ <vocab list here> ] }
+                    var requestedInfo = (key_name === "vocabulary") ? response.requested_information.general : response.requested_information;
+                    
                     if (Wrapper) {
                         if (self[key_name]) {
-                            self[key_name].update(response.requested_information);
+                            self[key_name].update(requestedInfo);
                         } else {
-                            self[key_name] = new Wrapper(response.requested_information);
+                            self[key_name] = new Wrapper(requestedInfo);
                         }
                     } else {
-                        self[key_name] = response.requested_information;
+                        self[key_name] = requestedInfo;
                     }
                     if (self[key_name].cacheDump) {
                         self[key_name].cacheDump(self.storage);
