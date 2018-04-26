@@ -139,7 +139,7 @@
 var wanikani = (function(window, document) {
     "use strict";
     var users = {};
-    var url_base = 'http://www.wanikani.com';
+    var url_base = 'https://www.wanikani.com';
     var api_path = 'api/v1.4/user';
     var getURI = function() {
         var args = Array.prototype.slice.call(arguments, 0);
